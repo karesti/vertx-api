@@ -8,12 +8,13 @@ import io.vertx.core.VertxOptions;
 import io.vertx.core.json.JsonObject;
 import io.vertx.reactivex.core.AbstractVerticle;
 import io.vertx.reactivex.core.Vertx;
+import io.vertx.reactivex.core.shareddata.Lock;
 
 public class RebootConsumer extends AbstractVerticle {
 
    public static final String REBOOT_ADDRESS = "reboot";
 
-   private AtomicBoolean reboot = new AtomicBoolean(false);
+   private boolean reboot = false;
    private String id = "ID-" + UUID.randomUUID().toString().substring(0, 4).toUpperCase();
 
    @Override
@@ -23,22 +24,40 @@ public class RebootConsumer extends AbstractVerticle {
          int id = ((Integer) message.body()).intValue();
 
          if (id == 0) {
-            launchReboot();
+            launchRebootWithLock();
          }
       });
 
       startFuture.complete();
    }
 
+   private void launchRebootWithLock() {
+      if (!reboot) {
+         reboot = true;
+         vertx.sharedData().getLock("lock", ar -> {
+            vertx.eventBus().send(REBOOT_ADDRESS, startRebootMessage());
+            System.out.println(">> Start system reboot ... ");
+            Lock lock = ar.result();
+            vertx.setTimer(3000, h -> {
+               vertx.eventBus().send(REBOOT_ADDRESS, endRebootMessage());
+               System.out.println("<< Reboot Over");
+               reboot = false;
+               lock.release();
+            });
+         });
+      }
+   }
+
    private void launchReboot() {
-      if (!reboot.getAndSet(true)) {
+      if (!reboot) {
+         reboot = true;
          vertx.eventBus().send(REBOOT_ADDRESS, startRebootMessage());
          System.out.println(">> Start system reboot ... ");
 
          vertx.setTimer(3000, h -> {
             vertx.eventBus().send(REBOOT_ADDRESS, endRebootMessage());
             System.out.println("<< Reboot Over");
-            reboot.set(false);
+            reboot = false;
          });
       }
    }
